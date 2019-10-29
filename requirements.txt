@@ -1,1 +1,2 @@
 frida>=12.0.7
+hexdump>=3.3
