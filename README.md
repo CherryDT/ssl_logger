@@ -1,10 +1,14 @@
-# ssl_logger
+# ssl_logger (Windows fork)
 
 Decrypts and logs a process's SSL traffic.
+
+Forked by David Trapp <dt@david-trapp.com> to work on Windows as well.
 
 The functionality offered by *ssl_logger* is intended to mimic [Echo Mirage](http://resources.infosecinstitute.com/echo-mirage-walkthrough/)'s SSL logging functionality on Linux and macOS.
 
 ## Basic Usage
+
+Note: First, install `frida` and `hexdump` Python modules: `pip install frida hexdump`.
 
 `python ssl_logger.py [-pcap <path>] [-verbose] <process name | process id>`
 
@@ -160,6 +164,8 @@ SSL Session: 1820201001719DF42ECCA1D289C3D32E0AA0454B50E8AF00E8A65B0108F209A8
 This program uses the [frida](https://www.frida.re/) framework to perform code injection.
 
 Frida can be installed as follows: `sudo pip install frida`
+
+Also, `hexdump` is required: `sudo pip install hexdump`
 
 ## TODO
 
