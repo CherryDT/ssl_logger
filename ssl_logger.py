@@ -41,6 +41,7 @@ import signal
 import socket
 import struct
 import time
+import re
 
 import frida
 
@@ -51,32 +52,50 @@ except ImportError:
 
 
 _FRIDA_SCRIPT = """
+  var addresses = {};
+  var SSL_get_fd;
+  var SSL_get_session;
+  var SSL_SESSION_get_id;
+  var getpeername;
+  var getsockname;
+  var ntohs;
+  var ntohl;
+
   /**
    * Initializes 'addresses' dictionary and NativeFunctions.
    */
   function initializeGlobals()
   {
-    addresses = {};
+
+    var exps = [
+      [Process.platform == "windows" ? 'ssleay32.dll' : "*libssl*",
+        ["SSL_read", "SSL_write", "SSL_get_fd", "SSL_get_session",
+        "SSL_SESSION_get_id"]],
+      [Process.platform == "darwin" ? "*libsystem*" : Process.platform == "windows" ? 'ws2_32.dll' : "*libc*",
+        ["getpeername", "getsockname", "ntohs", "ntohl"]]
+    ];
 
     var resolver = new ApiResolver("module");
 
-    var exps = [
-      ["*libssl*",
-        ["SSL_read", "SSL_write", "SSL_get_fd", "SSL_get_session",
-        "SSL_SESSION_get_id"]],
-      [Process.platform == "darwin" ? "*libsystem*" : "*libc*",
-        ["getpeername", "getsockname", "ntohs", "ntohl"]]
-      ];
     for (var i = 0; i < exps.length; i++)
     {
       var lib = exps[i][0];
       var names = exps[i][1];
 
+      var exports;
+      if (Process.platform == "windows") exports = Process.getModuleByName(lib).enumerateExports();
+
       for (var j = 0; j < names.length; j++)
       {
         var name = names[j];
-        var matches = resolver.enumerateMatchesSync("exports:" + lib + "!" +
-          name);
+        var matches;
+
+        if (Process.platform == "windows") {
+          matches = exports.filter(function (e) { return e.name === name });
+        } else {
+          matches = resolver.enumerateMatchesSync("exports:" + lib + "!" + name);
+        }
+
         if (matches.length == 0)
         {
           throw "Could not find " + lib + "!" + name;
@@ -230,6 +249,17 @@ _FRIDA_SCRIPT = """
   });
   """
 
+# Patch socket on Windows
+def inet_ntop(family, ipstr):
+  if family == socket.AF_INET:
+    return socket.inet_ntoa(ipstr).encode('utf-8')
+  elif family == socket.AF_INET6:
+    addr = ':'.join(('%02X%02X' % (ord(i), ord(j))).lstrip('0') for i, j in zip(ipstr[::2], ipstr[1::2]))
+    addr = re.sub('::+', '::', addr, count=1)
+    return addr.encode('utf-8')
+
+if not hasattr(socket, 'inet_ntop'):
+    socket.inet_ntop = inet_ntop
 
 # ssl_session[<SSL_SESSION id>] = (<bytes sent by client>,
 #                                  <bytes sent by server>)
@@ -251,8 +281,8 @@ def ssl_log(process, pcap=None, verbose=False):
     NotImplementedError: Not running on a Linux or macOS system.
   """
 
-  if platform.system() not in ("Darwin", "Linux"):
-    raise NotImplementedError("This function is only implemented for Linux and "
+  if platform.system() not in ("Windows", "Darwin", "Linux"):
+    raise NotImplementedError("This function is only implemented for Windows, Linux and "
                               "macOS systems.")
 
   def log_pcap(pcap_file, ssl_session_id, function, src_addr, src_port,
@@ -373,7 +403,13 @@ def ssl_log(process, pcap=None, verbose=False):
 
   print "Press Ctrl+C to stop logging."
   try:
-    signal.pause()
+    try:
+        while True:
+            signal.pause()
+    except AttributeError:
+        # signal.pause() is missing for Windows; wait 1ms and loop instead
+        while True:
+            time.sleep(1)
   except KeyboardInterrupt:
     pass
 
